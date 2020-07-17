@@ -17,10 +17,11 @@ import (
 
 	"github.com/hakobera/go-webrtc-decoder/decoder"
 	gopointer "github.com/mattn/go-pointer"
+	"github.com/pion/rtp/codecs"
 )
 
 func isVP9KeyFrame(packets []interface{}) bool {
-	p := packets[0].(VP9Packet)
+	p := packets[0].(codecs.VP9Packet)
 	return !p.P
 }
 
@@ -68,7 +69,7 @@ func (d *VP9Decoder) Close() error {
 }
 
 func (d *VP9Decoder) NewFrameBuilder() *decoder.FrameBuilder {
-	return decoder.NewFrameBuilder(10, &VP9Packet{}, &VP9PartitionHeadChecker{})
+	return decoder.NewFrameBuilder(10, &codecs.VP9Packet{}, &codecs.VP9PartitionHeadChecker{})
 }
 
 func (d *VP9Decoder) Process(src <-chan *decoder.Frame, out chan<- decoder.DecodedImage) {
@@ -164,7 +165,7 @@ func (d *VP9Decoder) decode(frame []byte) error {
 func (d *VP9Decoder) assembleFrame(packets []interface{}) ([]byte, error) {
 	var a []byte
 	for _, p := range packets {
-		packet := p.(VP9Packet)
+		packet := p.(codecs.VP9Packet)
 		a = append(a, packet.Payload...)
 	}
 	return a, nil
