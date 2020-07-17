@@ -1,0 +1,31 @@
+on: [push]
+name: Test
+env:
+  GO111MODULE: "on"
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.14.x]
+        platform: [ubuntu-20.04, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install dependencies
+      run: |
+        if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt install libvpx-dev
+        elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install ffmpeg
+        else
+            echo "$RUNNER_OS not supported"
+            exit 1
+        fi
+      shell: bash    
+    - name: Setup Go
+      uses: actions/setup-go@v1
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout
+      uses: actions/checkout@v2
+    - name: Run unit test
+      run: go test ./...
