@@ -50,8 +50,15 @@ func NewFrameBuilder(maxLate uint16, depacketizer rtp.Depacketizer, checker rtp.
 // Push adds a RTP Packet to the FrameBuilder
 func (s *FrameBuilder) Push(p *rtp.Packet) {
 	s.buffer[p.SequenceNumber] = p
+
+	// Remove outdated references if SequenceNumber is increased.
+	if int16(p.SequenceNumber-s.lastPush) > 0 {
+		for i := s.lastPush; i != p.SequenceNumber+1; i++ {
+			s.buffer[i-s.maxLate] = nil
+		}
+	}
+
 	s.lastPush = p.SequenceNumber
-	s.buffer[p.SequenceNumber-s.maxLate] = nil
 }
 
 // We have a valid collection of RTP Packets
