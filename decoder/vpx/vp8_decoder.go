@@ -6,7 +6,6 @@ import "C"
 
 import (
 	"errors"
-	"log"
 	"reflect"
 	"sync"
 	"unsafe"
@@ -67,51 +66,58 @@ func (d *VP8Decoder) NewFrameBuilder() *decoder.FrameBuilder {
 	return decoder.NewFrameBuilder(10, &codecs.VP8Packet{}, &codecs.VP8PartitionHeadChecker{})
 }
 
-func (d *VP8Decoder) Process(src <-chan *decoder.Frame, out chan<- decoder.DecodedImage) {
+func (d *VP8Decoder) Process(src <-chan *decoder.Frame) chan decoder.VideoDecodeResult {
+	results := make(chan decoder.VideoDecodeResult)
 	if d.closed {
-		return
+		close(results)
+	} else {
+		go func() {
+			defer close(results)
+
+			keyFrameRequied := true
+
+			for frame := range src {
+				result := decoder.VideoDecodeResult{}
+
+				f, err := d.assembleFrame(frame.Packets)
+				if err != nil {
+					result.Err = err
+					results <- result
+					continue
+				}
+
+				isKeyFrame := isVP8KeyFrame(f)
+				if keyFrameRequied {
+					if !isKeyFrame {
+						continue
+					}
+					keyFrameRequied = false
+				}
+
+				err = d.decode(f)
+				if err != nil {
+					result.Err = err
+					results <- result
+					continue
+				}
+
+				var img *C.vpx_image_t
+				var iter C.vpx_codec_iter_t
+
+				img = C.vpx_codec_get_frame(d.context, &iter)
+				for img != nil {
+					result.Image = &DecodedImage{
+						image:      img,
+						isKeyFrame: isKeyFrame,
+					}
+					results <- result
+					img = C.vpx_codec_get_frame(d.context, &iter)
+				}
+			}
+		}()
 	}
 
-	defer close(out)
-
-	keyFrameRequied := true
-
-	for frame := range src {
-		var err error
-		var f []byte
-
-		f, err = d.assembleFrame(frame.Packets)
-		if err != nil {
-			log.Println("[WARN]", err)
-			continue
-		}
-
-		isKeyFrame := isVP8KeyFrame(f)
-		if keyFrameRequied {
-			if !isKeyFrame {
-				continue
-			}
-			keyFrameRequied = false
-		}
-
-		err = d.decode(f)
-		if err != nil {
-			log.Println("[WARN]", err)
-			continue
-		}
-
-		var img *C.vpx_image_t
-		var iter C.vpx_codec_iter_t
-
-		img = C.vpx_codec_get_frame(d.context, &iter)
-		for img != nil {
-			out <- &DecodedImage{
-				image:      img,
-				isKeyFrame: isKeyFrame,
-			}
-			img = C.vpx_codec_get_frame(d.context, &iter)
-		}
-	}
+	return results
 }
 
 func (d *VP8Decoder) init() error {
