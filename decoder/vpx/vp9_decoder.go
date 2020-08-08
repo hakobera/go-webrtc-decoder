@@ -9,7 +9,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"log"
 	"reflect"
 	"runtime"
 	"sync"
@@ -72,57 +71,64 @@ func (d *VP9Decoder) NewFrameBuilder() *decoder.FrameBuilder {
 	return decoder.NewFrameBuilder(10, &codecs.VP9Packet{}, &codecs.VP9PartitionHeadChecker{})
 }
 
-func (d *VP9Decoder) Process(src <-chan *decoder.Frame, out chan<- decoder.DecodedImage) {
+func (d *VP9Decoder) Process(src <-chan *decoder.Frame) chan decoder.VideoDecodeResult {
+	results := make(chan decoder.VideoDecodeResult)
 	if !d.initialized {
-		return
+		close(results)
+	} else {
+		go func() {
+			defer close(results)
+
+			keyFrameRequied := false
+
+			for frame := range src {
+				result := decoder.VideoDecodeResult{}
+
+				f, err := d.assembleFrame(frame.Packets)
+				if err != nil {
+					result.Err = err
+					results <- result
+					continue
+				}
+
+				isKeyFrame := isVP9KeyFrame(frame.Packets)
+				if keyFrameRequied {
+					if !isKeyFrame {
+						continue
+					}
+					keyFrameRequied = false
+				}
+
+				err = d.decode(f)
+				if err != nil {
+					result.Err = err
+					results <- result
+					continue
+				}
+
+				var img *C.vpx_image_t
+				var iter C.vpx_codec_iter_t
+				var qp C.int
+
+				img = C.vpx_codec_get_frame(d.context, &iter)
+				for img != nil {
+					ret := C.vpxCodecControl(d.context, C.VPXD_GET_LAST_QUANTIZER, unsafe.Pointer(&qp))
+					if ret != C.VPX_CODEC_OK {
+						break
+					}
+
+					result.Image = &DecodedImage{
+						image:      img,
+						isKeyFrame: isKeyFrame,
+					}
+					results <- result
+					img = C.vpx_codec_get_frame(d.context, &iter)
+				}
+			}
+		}()
 	}
 
-	defer close(out)
-
-	keyFrameRequied := false
-
-	for frame := range src {
-		var err error = nil
-		var f []byte
-
-		f, err = d.assembleFrame(frame.Packets)
-		if err != nil {
-			log.Println("[WARN]", err)
-			continue
-		}
-
-		isKeyFrame := isVP9KeyFrame(frame.Packets)
-		if keyFrameRequied {
-			if !isKeyFrame {
-				continue
-			}
-			keyFrameRequied = false
-		}
-
-		err = d.decode(f)
-		if err != nil {
-			log.Println("[WARN]", err)
-			continue
-		}
-
-		var img *C.vpx_image_t
-		var iter C.vpx_codec_iter_t
-		var qp C.int
-
-		img = C.vpx_codec_get_frame(d.context, &iter)
-		for img != nil {
-			ret := C.vpxCodecControl(d.context, C.VPXD_GET_LAST_QUANTIZER, unsafe.Pointer(&qp))
-			if ret != C.VPX_CODEC_OK {
-				break
-			}
-
-			out <- &DecodedImage{
-				image:      img,
-				isKeyFrame: isKeyFrame,
-			}
-			img = C.vpx_codec_get_frame(d.context, &iter)
-		}
-	}
+	return results
 }
 
 func (d *VP9Decoder) init() error {
