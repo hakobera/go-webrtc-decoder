@@ -13,6 +13,11 @@ Decoders for WebRTC apps written in go and Pion
 
 TBD
 
+## Tested Platform
+
+* Ubuntu 20.04 x84_64
+* macOS 10.15
+
 ## License
 
 ```
